@@ -222,6 +222,7 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
     chat.clearSearch();
     showModalBottomSheet(
       context: context,
+      useRootNavigator: true,
       isScrollControlled: true,
       builder: (_) => SizedBox(
         height: MediaQuery.of(context).size.height * 0.75,

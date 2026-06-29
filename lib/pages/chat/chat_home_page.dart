@@ -121,7 +121,7 @@ class _ChatHomePageState extends State<ChatHomePage> {
   AppBar _buildAppBar(BuildContext context, AuthProvider auth) {
     final chat = context.read<ChatProvider>();
     return AppBar(
-      title: Text(chat.currentConversation?.name ?? 'LumenIM'),
+      title: Text(chat.currentConversation?.name ?? 'RocketChat'),
       leading: IconButton(
         icon: const Icon(Icons.menu),
         onPressed: () => setState(() => _tabIndex = 0),

@@ -16,6 +16,7 @@ class ChatProvider extends ChangeNotifier {
   final ApiService _api = ApiService();
   final DdpClient _ddp = DdpClient();
   final FileService _fileService = FileService();
+  bool _ddpStatusRegistered = false;
 
   List<Conversation> conversations = [];
   String? currentRoomId;
@@ -36,10 +37,13 @@ class ChatProvider extends ChangeNotifier {
     final auth = await AuthStorage.getAuthData();
     if (auth == null) return;
     _ddp.connect(wsUrl, auth.userId, auth.authToken);
-    _ddp.onStatus((status) {
-      ddpConnected = status == DdpStatus.connected;
-      notifyListeners();
-    });
+    if (!_ddpStatusRegistered) {
+      _ddpStatusRegistered = true;
+      _ddp.onStatus((status) {
+        ddpConnected = status == DdpStatus.connected;
+        notifyListeners();
+      });
+    }
   }
 
   void disconnectDdp() {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -15,6 +16,13 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
   final _textCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   final _focusNode = FocusNode();
+  String? _lastRoomId;
+  bool? _prevMessagesLoading;
+  int _prevMessagesLen = 0;
+
+  // 图片加载后自动跟底的定时器
+  Timer? _catchUpTimer;
+  double _lastCatchUpExtent = 0;
 
   @override
   void initState() {
@@ -22,11 +30,45 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
+  /// 消息首次加载完成后，启动定时轮询：只要 maxScrollExtent 在增长（图片陆续加载）
+  /// 且用户没有手动向上滚，就自动跳到底部。3 秒后停止。
+  void _startCatchUpScroll() {
+    _catchUpTimer?.cancel();
+    if (!_scrollCtrl.hasClients) return;
+    _lastCatchUpExtent = _scrollCtrl.position.maxScrollExtent;
+    _scrollToBottomImmediate();
+
+    int tick = 0;
+    _catchUpTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
+      if (!mounted || !_scrollCtrl.hasClients) { timer.cancel(); return; }
+      final pos = _scrollCtrl.position;
+      final extent = pos.maxScrollExtent;
+      final pixels = pos.pixels;
+
+      // 用户如果手动滚上去了（离开底部超过 200px），停止跟底
+      if (pixels < _lastCatchUpExtent - 200) { timer.cancel(); return; }
+
+      // 内容变高了，跳到底部
+      if (extent > _lastCatchUpExtent) {
+        _lastCatchUpExtent = extent;
+        _scrollToBottomImmediate();
+      }
+
+      tick++;
+      if (tick >= 10) timer.cancel(); // 最多 3 秒
+    });
+  }
+
   void _scrollToBottom() {
     if (_scrollCtrl.hasClients) {
-      Future.delayed(const Duration(milliseconds: 100), () {
-        _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
-      });
+      _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
+    }
+  }
+
+  void _scrollToBottomImmediate() {
+    if (_scrollCtrl.hasClients) {
+      _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
     }
   }
 
@@ -74,11 +116,29 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
     final chat = context.watch<ChatProvider>();
     final messages = chat.messages;
     final userId = context.read<AuthProvider>().userId;
+    final currentRoomId = chat.currentRoomId;
+    final messagesLoading = chat.messagesLoading;
 
-    // 新消息滚动
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (messages.isNotEmpty) _scrollToBottom();
-    });
+    // 切换房间时重置跟踪状态
+    if (currentRoomId != _lastRoomId) {
+      _lastRoomId = currentRoomId;
+      _prevMessagesLoading = null;
+      _prevMessagesLen = 0;
+      _catchUpTimer?.cancel();
+      _lastCatchUpExtent = 0;
+    }
+
+    // 消息加载完成时 → 立即跳底 + 启动轮询跟底（追补图片加载导致的高度变化）
+    if (_prevMessagesLoading == true && !messagesLoading && messages.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _startCatchUpScroll());
+    }
+    _prevMessagesLoading = messagesLoading;
+
+    // DDP 实时推送新消息时平滑滚动
+    if (messages.length > _prevMessagesLen && _prevMessagesLen > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    }
+    _prevMessagesLen = messages.length;
 
     return Column(
       children: [
@@ -186,6 +246,7 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
   }
 
   @override void dispose() {
+    _catchUpTimer?.cancel();
     _textCtrl.dispose(); _scrollCtrl.dispose(); _focusNode.dispose();
     super.dispose();
   }

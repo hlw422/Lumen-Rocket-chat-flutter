@@ -40,7 +40,7 @@ class _LoginPageState extends State<LoginPage> {
                   children: [
                     const Icon(Icons.chat_bubble_rounded, size: 64, color: Colors.deepPurple),
                     const SizedBox(height: 8),
-                    Text('LumenIM', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
+                    Text('RocketChat', style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
                     const SizedBox(height: 24),
                     TextField(
                       controller: _userCtrl,

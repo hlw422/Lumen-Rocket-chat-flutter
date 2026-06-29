@@ -20,7 +20,6 @@ class DdpClient {
   Timer? _pingTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
-  final int _maxReconnectAttempts = 10;
   bool _loginRetried = false;
 
   final Map<String, _RoomSub> _roomSubs = {};
@@ -188,6 +187,7 @@ class DdpClient {
       _connected = true;
       _loginRetried = false;
       _lastError = '';
+      _reconnectAttempts = 0;  // 连接成功后重置重连计数
       _notifyStatus(DdpStatus.connected);
       _resubscribeAll();
       _startPing();
@@ -328,16 +328,17 @@ class DdpClient {
   }
 
   void _scheduleReconnect() {
-    if (_reconnectAttempts >= _maxReconnectAttempts) {
-      _lastError = 'DDP reconnect max attempts reached';
-      return;
-    }
-    final base = 1000;
-    final shift = 1 << _reconnectAttempts;
-    final ms = (base * shift).clamp(1000, 30000);
+    _reconnectTimer?.cancel();
+    final ms = _calcReconnectDelay();
     _reconnectAttempts++;
     stdout.writeln('[DDP] Scheduling reconnect in ${ms}ms (attempt $_reconnectAttempts)');
     _reconnectTimer = Timer(Duration(milliseconds: ms), _doConnect);
+  }
+
+  int _calcReconnectDelay() {
+    // 指数退避: 1s, 2s, 4s, 8s, 16s, 30s, 30s, ...
+    if (_reconnectAttempts <= 0) return 1000;
+    return (1000 * (1 << _reconnectAttempts)).clamp(1000, 30000);
   }
 }
 

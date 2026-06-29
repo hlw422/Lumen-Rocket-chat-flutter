@@ -1,36 +1,39 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/message.dart';
 
 enum DdpStatus { connecting, connected, disconnected, error }
 
 class DdpClient {
-  WebSocketChannel? _channel;
+  WebSocket? _ws;
   String _url = '';
   String _userId = '';
   String _authToken = '';
   String _sessionId = '';
   bool _connected = false;
   bool get isConnected => _connected;
+  String get lastError => _lastError;
+  String _lastError = '';
   int _callId = 0;
   int _subIdCounter = 0;
   Timer? _pingTimer;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
   final int _maxReconnectAttempts = 10;
-  final int _initialReconnectDelay = 1000;
+  bool _loginRetried = false;
 
   final Map<String, _RoomSub> _roomSubs = {};
   final Map<String, Completer> _pending = {};
   final List<void Function(DdpStatus)> _statusCallbacks = [];
 
   void connect(String wsUrl, String userId, String authToken) {
-    if (wsUrl == _url && userId == _userId && _channel != null) return;
+    if (_ws != null && wsUrl == _url && userId == _userId) return;
     disconnect();
     _url = wsUrl; _userId = userId; _authToken = authToken;
     _reconnectAttempts = 0;
+    _loginRetried = false;
+    _lastError = '';
     _doConnect();
   }
 
@@ -40,8 +43,8 @@ class DdpClient {
     _clearTimers();
     _roomSubs.clear();
     _pending.clear();
-    _channel?.sink.close();
-    _channel = null;
+    try { _ws?.close(); } catch (_) {}
+    _ws = null;
     _notifyStatus(DdpStatus.disconnected);
   }
 
@@ -60,7 +63,7 @@ class DdpClient {
   void unsubscribeRoom(String roomId) {
     final sub = _roomSubs.remove(roomId);
     if (sub != null && _connected) {
-      _send({'msg':'unsub','id':sub.subId});
+      _send({'msg': 'unsub', 'id': sub.subId});
     }
   }
 
@@ -72,43 +75,54 @@ class DdpClient {
     for (final cb in _statusCallbacks) cb(s);
   }
 
-  void _doConnect() {
+  Future<void> _doConnect() async {
     _notifyStatus(DdpStatus.connecting);
     stdout.writeln('[DDP] Connecting to $_url ...');
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(_url));
-      stdout.writeln('[DDP] WebSocket connected, sending DDP connect...');
-      _channel!.stream.listen(
-        (data) => _onMessage(data as String),
-        onError: (err) {
-          stdout.writeln('[DDP] WebSocket stream error: reconnecting...');
-          _notifyStatus(DdpStatus.error);
-          _scheduleReconnect();
+      _ws = await WebSocket.connect(_url);
+      stdout.writeln('[DDP] WebSocket connected! Sending DDP connect...');
+
+      // 发送 DDP connect 消息
+      _send({'msg': 'connect', 'version': '1', 'support': ['1', 'pre2', 'pre1']});
+
+      // 监听消息
+      _ws!.listen(
+        (data) {
+          if (data is String) {
+            _onMessage(data);
+          }
         },
-        onDone: () => _onClose(),
+        onError: (err) {
+          stdout.writeln('[DDP] WebSocket error: $err');
+          _onClose();
+        },
+        onDone: () {
+          stdout.writeln('[DDP] WebSocket closed');
+          _onClose();
+        },
+        cancelOnError: false,
       );
     } catch (e) {
-      stdout.writeln('[DDP] WebSocket connect failed: $e, reconnecting...');
+      stdout.writeln('[DDP] WebSocket connect failed: $e');
+      _lastError = e.toString();
       _notifyStatus(DdpStatus.error);
       _scheduleReconnect();
     }
-    // 等待连接建立后握手
-    // WebSocketChannel.connect 返回的是已连接的流，直接发送 connect
-    Future.delayed(const Duration(milliseconds: 100), () {
-      _send({'msg':'connect','version':'1','support':['1','pre2','pre1']});
-    });
   }
 
   void _onClose() {
+    if (!_connected) {
+      // 没成功连接过，尝试重连
+      _ws = null;
+      _scheduleReconnect();
+      return;
+    }
     _connected = false;
     _pending.clear();
     _clearTimers();
-    if (_reconnectAttempts < _maxReconnectAttempts) {
-      _notifyStatus(DdpStatus.disconnected);
-      _scheduleReconnect();
-    } else {
-      _notifyStatus(DdpStatus.disconnected);
-    }
+    _ws = null;
+    _notifyStatus(DdpStatus.disconnected);
+    _scheduleReconnect();
   }
 
   void _onMessage(String raw) {
@@ -117,7 +131,7 @@ class DdpClient {
       final msgType = data['msg'] as String? ?? '?';
       switch (msgType) {
         case 'connected':
-          _sessionId = data['session']??'';
+          _sessionId = data['session'] ?? '';
           stdout.writeln('[DDP] Server connected, session=$_sessionId, logging in...');
           _login();
           break;
@@ -131,7 +145,7 @@ class DdpClient {
           _handleChanged(data);
           break;
         case 'ping':
-          _send({'msg':'pong'});
+          _send({'msg': 'pong'});
           break;
         case 'nosub':
           stdout.writeln('[DDP] No subscription for: ${data['id']}');
@@ -144,11 +158,16 @@ class DdpClient {
     }
   }
 
-  bool _loginRetried = false;
-
   void _login() {
-    stdout.writeln('[DDP] Sending login with resume token (length=${_authToken.length})...');
-    _send({'msg':'method','method':'login','params':[{'resume':_authToken}],'id':_nextCallId()});
+    stdout.writeln('[DDP] Sending login with resume token (len=${_authToken.length})...');
+    _send({
+      'msg': 'method',
+      'method': 'login',
+      'params': [
+        {'resume': _authToken}
+      ],
+      'id': _nextCallId(),
+    });
   }
 
   void _handleResult(Map<String, dynamic> data) {
@@ -165,28 +184,38 @@ class DdpClient {
       stdout.writeln('[DDP] Login success, userId=${result['id']}, connected!');
       _connected = true;
       _loginRetried = false;
+      _lastError = '';
       _notifyStatus(DdpStatus.connected);
       _resubscribeAll();
       _startPing();
     } else if (data['error'] != null) {
       stdout.writeln('[DDP] Login failed: ${data['error']}');
-      // 尝试用 accessToken 格式重试一次
       if (!_loginRetried) {
         _loginRetried = true;
-        stdout.writeln('[DDP] Retrying login with accessToken format...');
-        _send({'msg':'method','method':'login','params':[{'accessToken':_authToken}],'id':_nextCallId()});
+        stdout.writeln('[DDP] Retrying login with accessToken...');
+        _send({
+          'msg': 'method',
+          'method': 'login',
+          'params': [
+            {'accessToken': _authToken}
+          ],
+          'id': _nextCallId(),
+        });
       } else {
-        stdout.writeln('[DDP] Both login attempts failed');
+        _lastError = 'DDP login failed: ${data['error']}';
+        stdout.writeln('[DDP] Both login attempts failed: $_lastError');
         _notifyStatus(DdpStatus.error);
+        _ws?.close();
       }
     } else {
       stdout.writeln('[DDP] Unhandled result: $data');
+      _lastError = 'Unexpected login response';
     }
   }
 
   void _handleChanged(Map<String, dynamic> data) {
     if (data['collection'] != 'stream-room-messages') {
-      if (data['collection'] != null) stdout.writeln('[DDP] Changed for ${data['collection']}, ignoring');
+      if (data['collection'] != null) stdout.writeln('[DDP] Changed: ${data['collection']}');
       return;
     }
     final fields = data['fields'];
@@ -199,67 +228,112 @@ class DdpClient {
       if (roomId == null) continue;
       final sub = _roomSubs[roomId];
       if (sub == null) {
-        stdout.writeln('[DDP] No subscriber for room $roomId (current subs: ${_roomSubs.keys.join(",")})');
+        stdout.writeln('[DDP] No sub for $roomId, have: ${_roomSubs.keys.join(",")}');
         continue;
       }
 
       final rcMsg = RCMessage(
-        id: msgPayload['_id']??'',
-        rid: msgPayload['rid']??'',
-        msg: msgPayload['msg']??'',
-        ts: msgPayload['ts'] is Map
-          ? DateTime.tryParse(msgPayload['ts']['\$date'] as String? ?? '')?.toIso8601String() ?? DateTime.now().toIso8601String()
-          : (msgPayload['ts'] as String? ?? DateTime.now().toIso8601String()),
+        id: msgPayload['_id'] ?? '',
+        rid: msgPayload['rid'] ?? '',
+        msg: msgPayload['msg'] ?? '',
+        ts: _parseTs(msgPayload['ts']),
         u: MsgSender(
-          id: msgPayload['u']?['_id']??'',
-          username: msgPayload['u']?['username']??'unknown',
+          id: msgPayload['u']?['_id'] ?? '',
+          username: msgPayload['u']?['username'] ?? 'unknown',
           name: msgPayload['u']?['name'],
         ),
         type: msgPayload['t'],
         attachments: (msgPayload['attachments'] as List?)
-          ?.map((e)=>RCAttachment.fromJson(e as Map<String,dynamic>))?.toList()??[],
+                ?.map((e) => RCAttachment.fromJson(e as Map<String, dynamic>))
+                ?.toList() ??
+            [],
       );
       sub.callback(rcMsg);
     }
   }
 
   void _sendSubscribe(String roomId, String subId) {
-    stdout.writeln('[DDP] Sending subscribe: roomId=$roomId, subId=$subId');
-    _send({'msg':'sub','id':subId,'name':'stream-room-messages','params':[roomId,false]});
+    stdout.writeln('[DDP] Sending subscribe: room=$roomId');
+    _send({
+      'msg': 'sub',
+      'id': subId,
+      'name': 'stream-room-messages',
+      'params': [roomId, false]
+    });
   }
 
   void _resubscribeAll() {
-    stdout.writeln('[DDP] Resubscribing to ${_roomSubs.length} rooms: ${_roomSubs.keys.join(",")}');
+    stdout.writeln('[DDP] Resubscribing ${_roomSubs.length} rooms: ${_roomSubs.keys.join(",")}');
     for (final entry in _roomSubs.entries) {
       _sendSubscribe(entry.key, entry.value.subId);
     }
   }
 
   void _send(Map<String, dynamic> data) {
-    _channel?.sink.add(jsonEncode(data));
+    try {
+      _ws?.add(jsonEncode(data));
+    } catch (e) {
+      stdout.writeln('[DDP] Send error: $e');
+    }
+  }
+
+  /// 解析 Rocket.Chat DDP 消息中的 ts 字段，支持多种格式：
+  /// - int: 毫秒时间戳
+  /// - String: ISO 8601 或毫秒数字符串
+  /// - Map: {"$date": int/String}
+  String _parseTs(dynamic ts) {
+    if (ts == null) return DateTime.now().toIso8601String();
+    if (ts is int) {
+      return DateTime.fromMillisecondsSinceEpoch(ts).toIso8601String();
+    }
+    if (ts is String) {
+      final dt = DateTime.tryParse(ts);
+      if (dt != null) return dt.toIso8601String();
+      // 可能是纯数字毫秒戳字符串
+      final ms = int.tryParse(ts);
+      if (ms != null) return DateTime.fromMillisecondsSinceEpoch(ms).toIso8601String();
+      return DateTime.now().toIso8601String();
+    }
+    if (ts is Map) {
+      final date = ts['\$date'];
+      if (date is int) return DateTime.fromMillisecondsSinceEpoch(date).toIso8601String();
+      if (date is String) {
+        final dt = DateTime.tryParse(date);
+        if (dt != null) return dt.toIso8601String();
+        final ms = int.tryParse(date);
+        if (ms != null) return DateTime.fromMillisecondsSinceEpoch(ms).toIso8601String();
+      }
+    }
+    return DateTime.now().toIso8601String();
   }
 
   String _nextCallId() => '${++_callId}';
 
   void _startPing() {
+    _pingTimer?.cancel();
     _pingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      _send({'msg':'pong'});
+      _send({'msg': 'pong'});
     });
   }
 
   void _clearTimers() {
-    _pingTimer?.cancel(); _pingTimer = null;
-    _reconnectTimer?.cancel(); _reconnectTimer = null;
+    _pingTimer?.cancel();
+    _pingTimer = null;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
   }
 
   void _scheduleReconnect() {
-    if (_reconnectAttempts >= _maxReconnectAttempts) return;
-    final delay = (_initialReconnectDelay * (1 << _reconnectAttempts)).clamp(1000, 30000);
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      _lastError = 'DDP reconnect max attempts reached';
+      return;
+    }
+    final base = 1000;
+    final shift = 1 << _reconnectAttempts;
+    final ms = (base * shift).clamp(1000, 30000);
     _reconnectAttempts++;
-    _reconnectTimer = Timer(Duration(milliseconds: delay), () {
-      if (_connected) return;
-      _doConnect();
-    });
+    stdout.writeln('[DDP] Scheduling reconnect in ${ms}ms (attempt $_reconnectAttempts)');
+    _reconnectTimer = Timer(Duration(milliseconds: ms), _doConnect);
   }
 }
 

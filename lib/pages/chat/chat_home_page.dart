@@ -57,15 +57,23 @@ class _ChatHomePageState extends State<ChatHomePage> {
       // 桌面：Row 三栏布局
       return Scaffold(
         appBar: _buildAppBar(context, auth),
-        body: Row(
+        body: Column(
           children: [
-            SizedBox(width: 300, child: _buildConvList(chat)),
-            const VerticalDivider(width: 1),
-            Expanded(child: _buildMsgPanel(chat)),
-            if (chat.currentRoomId != null) ...[
-              const VerticalDivider(width: 1),
-              SizedBox(width: 280, child: const UserSearchPanel()),
-            ],
+            if (chat.conversationsError && chat.conversations.isEmpty)
+              _buildErrorBanner(chat),
+            Expanded(
+              child: Row(
+                children: [
+                  SizedBox(width: 300, child: _buildConvList(chat)),
+                  const VerticalDivider(width: 1),
+                  Expanded(child: _buildMsgPanel(chat)),
+                  if (chat.currentRoomId != null) ...[
+                    const VerticalDivider(width: 1),
+                    SizedBox(width: 280, child: const UserSearchPanel()),
+                  ],
+                ],
+              ),
+            ),
           ],
         ),
       );
@@ -78,12 +86,20 @@ class _ChatHomePageState extends State<ChatHomePage> {
         : _tabIndex == 2
           ? AppBar(title: const Text('在线用户'))
           : _buildAppBar(context, auth),
-      body: IndexedStack(
-        index: _tabIndex,
+      body: Column(
         children: [
-          _buildConvList(chat),
-          _buildMsgPanel(chat),
-          const UserSearchPanel(),
+          if (chat.conversationsError && chat.conversations.isEmpty)
+            _buildErrorBanner(chat),
+          Expanded(
+            child: IndexedStack(
+              index: _tabIndex,
+              children: [
+                _buildConvList(chat),
+                _buildMsgPanel(chat),
+                const UserSearchPanel(),
+              ],
+            ),
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -132,6 +148,33 @@ class _ChatHomePageState extends State<ChatHomePage> {
   }
 
   Widget _buildConvList(ChatProvider chat) => const ConversationListWidget();
+
+  Widget _buildErrorBanner(ChatProvider chat) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: Colors.red.shade50,
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off, color: Colors.red, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              chat.error ?? '无法连接服务器',
+              style: const TextStyle(color: Colors.red, fontSize: 13),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              chat.loadConversations();
+              chat.connectDdp();
+            },
+            child: const Text('重试', style: TextStyle(fontSize: 13)),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildMsgPanel(ChatProvider chat) {
     if (chat.currentRoomId == null) {

@@ -102,7 +102,19 @@ class ChatProvider extends ChangeNotifier {
 
   String _formatErr(Object e) {
     final s = e.toString();
-    if (s.contains('DioException') || s.contains('SocketException')) return '网络连接失败，请检查服务器地址';
+    if (s.contains('DioException') || s.contains('SocketException')) {
+      if (s.contains('Connection timed out') || s.contains('TimeoutException')) {
+        return '服务器连接超时，请确认 192.168.1.189:3000 已启动';
+      }
+      if (s.contains('Connection refused')) {
+        return 'Rocket.Chat 服务未启动(192.168.1.189:3000)';
+      }
+      if (s.contains('No address associated') || s.contains('Failed host lookup')) {
+        return '无法解析服务器地址，请检查网络配置';
+      }
+      final errType = s.contains('type=') ? s.split('type=')[1].split(',')[0].split('>')[0].trim() : '未知';
+      return '网络连接失败($errType)';
+    }
     if (s.length > 80) return '${s.substring(0, 80)}…';
     return s;
   }

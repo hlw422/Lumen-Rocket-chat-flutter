@@ -147,6 +147,9 @@ class DdpClient {
         case 'ping':
           _send({'msg': 'pong'});
           break;
+        case 'pong':
+          // heartbeat ack
+          break;
         case 'nosub':
           stdout.writeln('[DDP] No subscription for: ${data['id']}');
           break;
@@ -311,8 +314,9 @@ class DdpClient {
 
   void _startPing() {
     _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      _send({'msg': 'pong'});
+    // 每 20 秒发送一次心跳，低于 Rocket.Chat 默认 25s 超时
+    _pingTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      _send({'msg': 'ping'});
     });
   }
 

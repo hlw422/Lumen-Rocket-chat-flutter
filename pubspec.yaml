@@ -1,0 +1,41 @@
+name: flutter_code
+description: "LumenIM Flutter - Rocket.Chat 聊天客户端"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # 网络请求
+  dio: ^5.7.0
+  # WebSocket
+  web_socket_channel: ^3.0.2
+  # 状态管理
+  provider: ^6.1.2
+  # 本地存储
+  shared_preferences: ^2.3.4
+  # 图片缓存
+  cached_network_image: ^3.4.1
+  # 图片选择
+  image_picker: ^1.1.2
+  # 文件选择
+  file_picker: ^8.1.6
+  # 文件路径
+  path_provider: ^2.1.5
+  # 文件 MIME 类型
+  mime: ^2.0.0
+  # 打开文件
+  open_file: ^3.5.10
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

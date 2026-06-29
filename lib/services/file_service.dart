@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
 import '../utils/auth_storage.dart';
+import '../utils/constants.dart';
 
 class FileService {
   final Dio _dio = Dio(BaseOptions(
@@ -17,6 +18,10 @@ class FileService {
         if (auth != null) {
           options.headers['X-Auth-Token'] = auth.authToken;
           options.headers['X-User-Id'] = auth.userId;
+        }
+        // 相对路径补全为绝对路径
+        if (options.path.startsWith('/') && !options.path.startsWith('http')) {
+          options.path = '$rcHost${options.path}';
         }
         handler.next(options);
       },

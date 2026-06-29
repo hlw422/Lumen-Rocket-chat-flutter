@@ -185,7 +185,9 @@ class ChatProvider extends ChangeNotifier {
   /// 上传文件
   Future<ChatMessage?> uploadFile(String roomId, String filePath, {String? description}) async {
     try {
+      stdout.writeln('[CHAT] Uploading file: $filePath to room: $roomId');
       final res = await _api.uploadFile(roomId, filePath, description: description);
+      stdout.writeln('[CHAT] Upload success: msgId=${res.message.id}');
       final chatMsg = res.message.toChatMessage();
       if (!messages.any((m)=>m.id==chatMsg.id)) {
         messages = [...messages, chatMsg];

@@ -45,7 +45,12 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
     final chat = context.read<ChatProvider>();
     final roomId = chat.currentRoomId;
     if (roomId == null) return;
-    await chat.pickAndUpload(roomId, image: image);
+    final result = await chat.pickAndUpload(roomId, image: image);
+    if (result == null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('发送失败，请重试'), backgroundColor: Colors.red),
+      );
+    }
     _scrollToBottom();
   }
 

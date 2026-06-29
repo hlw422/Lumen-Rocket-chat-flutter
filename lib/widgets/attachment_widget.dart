@@ -63,16 +63,23 @@ class _AttachmentWidgetState extends State<AttachmentWidget> {
       return GestureDetector(
         onTap: () => _showPreview(),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.memory(_imageBytes!, fit: BoxFit.cover, width: 280),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 280, maxHeight: 200),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.memory(_imageBytes!, fit: BoxFit.contain),
+              ),
             ),
             const SizedBox(height: 4),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 const Text('图片', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                const SizedBox(width: 12),
                 GestureDetector(
                   onTap: _downloadFile,
                   child: const Text('下载', style: TextStyle(fontSize: 12, color: Colors.blue, decoration: TextDecoration.underline)),
@@ -83,10 +90,9 @@ class _AttachmentWidgetState extends State<AttachmentWidget> {
         ),
       );
     }
-    return Container(
+    return const SizedBox(
       width: 200, height: 120,
-      decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(8)),
-      child: const Center(child: Text('🖼️ 加载失败', style: TextStyle(color: Colors.grey))),
+      child: Center(child: Text('🖼️ 加载失败', style: TextStyle(color: Colors.grey))),
     );
   }
 

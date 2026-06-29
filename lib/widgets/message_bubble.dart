@@ -59,11 +59,17 @@ class _MessageBubbleState extends State<MessageBubble> {
               child: Column(
                 crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                 children: [
-                  if (!isMe)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 2),
-                      child: Text(message.senderName, style: const TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.w500)),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Text(
+                      message.senderName,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isMe ? cs.primary.withAlpha(180) : Colors.grey,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
+                  ),
                   Container(
                     constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -97,7 +103,14 @@ class _MessageBubbleState extends State<MessageBubble> {
                 ],
               ),
             ),
-            if (isMe) const SizedBox(width: 8),
+            if (isMe) ...[
+              const SizedBox(width: 8),
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: cs.primaryContainer,
+                child: Text(message.senderName.isNotEmpty ? message.senderName[0].toUpperCase() : '?', style: const TextStyle(fontSize: 14)),
+              ),
+            ],
           ],
         ),
       ),

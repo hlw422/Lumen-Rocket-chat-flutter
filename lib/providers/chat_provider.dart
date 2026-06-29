@@ -252,9 +252,10 @@ class ChatProvider extends ChangeNotifier {
     return _fileService.loadImage(url);
   }
 
-  /// 搜索当前会话中的消息
+  /// 搜索当前会话中的消息（加载 200 条历史后本地过滤，确保不漏搜）
   Future<void> searchMessages(String query) async {
-    if (query.trim().isEmpty) {
+    final q = query.trim();
+    if (q.isEmpty) {
       searchResults = [];
       searchQuery = null;
       notifyListeners();
@@ -262,17 +263,39 @@ class ChatProvider extends ChangeNotifier {
     }
     if (currentRoomId == null) return;
     searchLoading = true;
-    searchQuery = query.trim();
+    searchQuery = q;
     notifyListeners();
 
     try {
-      final res = await _api.searchMessages(
-        roomId: currentRoomId!,
-        searchText: searchQuery!,
-        count: 50,
-      );
-      searchResults = res.messages.map((m) => m.toChatMessage()).toList()
-        ..sort((a, b) => b.timestamp.compareTo(a.timestamp)); // 最新在前
+      final roomId = currentRoomId!;
+      final type = _currentRoomType;
+      // 先从线上拉取一大批消息
+      RCMessagesResponse res;
+      switch (type) {
+        case ConversationType.channel:
+          res = await _api.getChannelMessages(roomId, count: 200);
+          break;
+        case ConversationType.group:
+          res = await _api.getGroupMessages(roomId, count: 200);
+          break;
+        case ConversationType.direct:
+        default:
+          res = await _api.getImMessages(roomId, count: 200);
+          break;
+      }
+      final all = res.messages.map((m) => m.toChatMessage()).toList();
+
+      // 本地过滤：不区分大小写，同时搜索正文和附件名
+      final lower = q.toLowerCase();
+      searchResults = all.where((m) {
+        if (m.content.toLowerCase().contains(lower)) return true;
+        for (final a in m.attachments) {
+          final name = (a.name ?? a.title ?? '').toLowerCase();
+          if (name.contains(lower)) return true;
+        }
+        return false;
+      }).toList()
+        ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
     } catch (e) {
       debugPrint('searchMessages error: $e');
       error = _formatErr(e);

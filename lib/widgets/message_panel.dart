@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -20,55 +19,24 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
   bool? _prevMessagesLoading;
   int _prevMessagesLen = 0;
 
-  // 图片加载后自动跟底的定时器
-  Timer? _catchUpTimer;
-  double _lastCatchUpExtent = 0;
-
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    // reverse:true 使 ListView 默认从底部开始显示，无需手动滚动
   }
 
-  /// 消息首次加载完成后，启动定时轮询：只要 maxScrollExtent 在增长（图片陆续加载）
-  /// 且用户没有手动向上滚，就自动跳到底部。3 秒后停止。
-  void _startCatchUpScroll() {
-    _catchUpTimer?.cancel();
-    if (!_scrollCtrl.hasClients) return;
-    _lastCatchUpExtent = _scrollCtrl.position.maxScrollExtent;
-    _scrollToBottomImmediate();
-
-    int tick = 0;
-    _catchUpTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
-      if (!mounted || !_scrollCtrl.hasClients) { timer.cancel(); return; }
-      final pos = _scrollCtrl.position;
-      final extent = pos.maxScrollExtent;
-      final pixels = pos.pixels;
-
-      // 用户如果手动滚上去了（离开底部超过 200px），停止跟底
-      if (pixels < _lastCatchUpExtent - 200) { timer.cancel(); return; }
-
-      // 内容变高了，跳到底部
-      if (extent > _lastCatchUpExtent) {
-        _lastCatchUpExtent = extent;
-        _scrollToBottomImmediate();
-      }
-
-      tick++;
-      if (tick >= 10) timer.cancel(); // 最多 3 秒
-    });
-  }
-
+  /// 平滑滚动到底部（offset=0 即 reverse 列表的末端/视觉底部）
   void _scrollToBottom() {
     if (_scrollCtrl.hasClients) {
-      _scrollCtrl.animateTo(_scrollCtrl.position.maxScrollExtent,
+      _scrollCtrl.animateTo(0,
           duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
     }
   }
 
+  /// 立即跳到底部
   void _scrollToBottomImmediate() {
     if (_scrollCtrl.hasClients) {
-      _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+      _scrollCtrl.jumpTo(0);
     }
   }
 
@@ -124,13 +92,11 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
       _lastRoomId = currentRoomId;
       _prevMessagesLoading = null;
       _prevMessagesLen = 0;
-      _catchUpTimer?.cancel();
-      _lastCatchUpExtent = 0;
     }
 
-    // 消息加载完成时 → 立即跳底 + 启动轮询跟底（追补图片加载导致的高度变化）
+    // 消息加载完成时，若列表被重建则自动到底部（reverse 列表 offset=0 就是底部）
     if (_prevMessagesLoading == true && !messagesLoading && messages.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _startCatchUpScroll());
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottomImmediate());
     }
     _prevMessagesLoading = messagesLoading;
 
@@ -150,10 +116,15 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
               ? const Center(child: Text('暂无消息', style: TextStyle(color: Colors.grey)))
               : SelectionArea(
                   child: ListView.builder(
+                    reverse: true,
                     controller: _scrollCtrl,
                     itemCount: messages.length,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    itemBuilder: (_, i) => MessageBubble(message: messages[i], isMe: messages[i].senderId == userId),
+                    itemBuilder: (_, i) {
+                      // reverse:true 时 index 0 在最底部，所以取 messages 尾部
+                      final msg = messages[messages.length - 1 - i];
+                      return MessageBubble(message: msg, isMe: msg.senderId == userId);
+                    },
                   ),
                 ),
         ),
@@ -246,7 +217,6 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
   }
 
   @override void dispose() {
-    _catchUpTimer?.cancel();
     _textCtrl.dispose(); _scrollCtrl.dispose(); _focusNode.dispose();
     super.dispose();
   }

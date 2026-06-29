@@ -59,8 +59,6 @@ class _ChatHomePageState extends State<ChatHomePage> {
         appBar: _buildAppBar(context, auth),
         body: Column(
           children: [
-            if (!chat.ddpConnected && chat.currentRoomId != null)
-              _buildDdpBanner(chat),
             if (chat.conversationsError && chat.conversations.isEmpty)
               _buildErrorBanner(chat),
             Expanded(
@@ -90,8 +88,6 @@ class _ChatHomePageState extends State<ChatHomePage> {
           : _buildAppBar(context, auth),
       body: Column(
         children: [
-          if (!chat.ddpConnected && chat.currentRoomId != null)
-            _buildDdpBanner(chat),
           if (chat.conversationsError && chat.conversations.isEmpty)
             _buildErrorBanner(chat),
           Expanded(
@@ -152,27 +148,6 @@ class _ChatHomePageState extends State<ChatHomePage> {
   }
 
   Widget _buildConvList(ChatProvider chat) => const ConversationListWidget();
-
-  Widget _buildDdpBanner(ChatProvider chat) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: Colors.orange.shade100,
-      child: Row(
-        children: [
-          const Icon(Icons.warning_amber, color: Colors.orange, size: 20),
-          const SizedBox(width: 8),
-          const Expanded(
-            child: Text('实时消息未连接，收不到新消息', style: TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.bold)),
-          ),
-          TextButton(
-            onPressed: () => chat.connectDdp(),
-            child: const Text('重连', style: TextStyle(fontSize: 13)),
-          ),
-        ],
-      ),
-    );
-  }
 
   Widget _buildErrorBanner(ChatProvider chat) {
     return Container(

@@ -1,11 +1,14 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import '../services/api_service.dart';
 import '../services/ddp_client.dart';
 import '../services/file_service.dart';
 import '../utils/auth_storage.dart';
+import '../utils/constants.dart';
 import '../models/room.dart';
 import '../models/message.dart';
 
@@ -32,7 +35,7 @@ class ChatProvider extends ChangeNotifier {
   Future<void> connectDdp() async {
     final auth = await AuthStorage.getAuthData();
     if (auth == null) return;
-    _ddp.connect('ws://192.168.1.189:3000/websocket', auth.userId, auth.authToken);
+    _ddp.connect(wsUrl, auth.userId, auth.authToken);
     _ddp.onStatus((status) {
       ddpConnected = status == DdpStatus.connected;
       notifyListeners();
@@ -74,6 +77,20 @@ class ChatProvider extends ChangeNotifier {
     currentRoomId = roomId;
     _currentRoomType = type ?? currentConversation?.type;
     await _loadMessages(roomId, type: _currentRoomType);
+
+    // 确保 DDP 已连接（等待最多 5 秒）
+    if (!_ddp.isConnected) {
+      stdout.writeln('[CHAT] DDP not connected, waiting...');
+      // 如果之前没连接，重新触发连接
+      await connectDdp();
+      // 等待连接完成
+      for (int i = 0; i < 25 && !_ddp.isConnected; i++) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        if (_ddp.isConnected) break;
+      }
+      stdout.writeln('[CHAT] After wait: ddpConnected=${_ddp.isConnected}');
+    }
+
     _ddp.subscribeRoom(roomId, _onDdpMessage);
     notifyListeners();
   }
@@ -102,26 +119,47 @@ class ChatProvider extends ChangeNotifier {
 
   String _formatErr(Object e) {
     final s = e.toString();
-    if (s.contains('DioException') || s.contains('SocketException')) {
-      if (s.contains('Connection timed out') || s.contains('TimeoutException')) {
-        return '服务器连接超时，请确认 192.168.1.189:3000 已启动';
+    debugPrint('[CHAT_ERROR] $s');
+    if (e is DioException) {
+      final path = e.requestOptions.path;
+      if (e.response != null) {
+        final statusCode = e.response!.statusCode;
+        if (statusCode == 401 || statusCode == 403) {
+          return '登录已失效，请重新登录\nAPI: $path';
+        }
+        final responseData = e.response!.data;
+        String detail = '';
+        if (responseData is Map) {
+          if (responseData.containsKey('error')) detail = '\n${responseData['error']}';
+          else if (responseData.containsKey('message')) detail = '\n${responseData['message']}';
+        }
+        return '服务器返回错误 (${statusCode ?? '未知'})\nAPI: $path$detail';
       }
-      if (s.contains('Connection refused')) {
-        return 'Rocket.Chat 服务未启动(192.168.1.189:3000)';
+      if (e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.receiveTimeout) {
+        return '服务器连接超时，请确认 $rcHost 已启动\nAPI: $path';
       }
-      if (s.contains('No address associated') || s.contains('Failed host lookup')) {
-        return '无法解析服务器地址，请检查网络配置';
+      if (e.type == DioExceptionType.connectionError) {
+        return 'Rocket.Chat 服务未启动($rcHost)\nAPI: $path';
       }
-      final errType = s.contains('type=') ? s.split('type=')[1].split(',')[0].split('>')[0].trim() : '未知';
-      return '网络连接失败($errType)';
+      if (e.type == DioExceptionType.badResponse) {
+        return '服务器返回错误\nAPI: $path';
+      }
+      final errType = s.contains('type=')
+          ? s.split('type=')[1].split(',')[0].split('>')[0].trim()
+          : '未知';
+      return '网络连接失败($errType)\nAPI: $path\n请确认服务器地址 $rcHost 可访问';
     }
-    if (s.length > 80) return '${s.substring(0, 80)}…';
+    if (s.contains('SocketException')) {
+      return '网络连接失败，请检查网络';
+    }
+    if (s.length > 100) return '${s.substring(0, 100)}…';
     return s;
   }
 
   void _onDdpMessage(RCMessage rcMsg) {
     if (rcMsg.rid != currentRoomId) return;
     final chatMsg = rcMsg.toChatMessage();
+    stdout.writeln('[CHAT] DDP message received: room=${rcMsg.rid}, from=${chatMsg.senderName}, content=${chatMsg.content.length > 50 ? chatMsg.content.substring(0, 50) : chatMsg.content}');
     if (!messages.any((m)=>m.id==chatMsg.id)) {
       messages = [...messages, chatMsg]..sort((a,b)=>a.timestamp.compareTo(b.timestamp));
       notifyListeners();

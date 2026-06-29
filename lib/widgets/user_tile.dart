@@ -49,6 +49,7 @@ class _UserTileState extends State<UserTile> {
         final chat = context.read<ChatProvider>();
         await chat.loadConversations();
         await chat.selectConversation(room.id, type: ConversationType.direct);
+        if (mounted) setState(() => _loading = false);
       } else {
         setState(() => _loading = false);
         if (mounted) {

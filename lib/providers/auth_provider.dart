@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import '../services/api_service.dart';
 import '../utils/auth_storage.dart';
 import '../models/user.dart';
@@ -81,20 +82,43 @@ class AuthProvider extends ChangeNotifier {
 
   String _formatError(Object e) {
     final s = e.toString();
-    if (s.contains('DioException')) {
-      if (s.contains('Connection timed out') || s.contains('TimeoutException')) {
-        return '连接超时，请确认 Rocket.Chat 服务(192.168.1.189:3000)已启动';
+    debugPrint('[AUTH_ERROR] $s');
+    if (e is DioException) {
+      final path = e.requestOptions.path;
+      if (e.response != null) {
+        final statusCode = e.response!.statusCode;
+        if (statusCode == 401 || statusCode == 403) {
+          return '用户名或密码错误\nAPI: $path';
+        }
+        final responseData = e.response!.data;
+        String detail = '';
+        if (responseData is Map) {
+          if (responseData.containsKey('error')) detail = '\n${responseData['error']}';
+          else if (responseData.containsKey('message')) detail = '\n${responseData['message']}';
+        }
+        return '登录失败，服务器返回错误码: ${statusCode ?? '未知'}\nAPI: $path$detail';
       }
-      if (s.contains('Connection refused') || s.contains('SocketException')) {
-        return 'Rocket.Chat 服务未启动，请启动 192.168.1.189:3000';
+      if (e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.receiveTimeout) {
+        return '连接超时，请确认 Rocket.Chat 服务(192.168.1.189:3000)已启动\nAPI: $path';
       }
-      if (s.contains('No address associated') || s.contains('Failed host lookup')) {
-        return '无法解析服务器地址 192.168.1.189，请检查网络';
+      if (e.type == DioExceptionType.connectionError) {
+        return 'Rocket.Chat 服务未启动，请启动 192.168.1.189:3000\nAPI: $path';
       }
-      return '网络连接失败(${s.contains('type=') ? s.split('type=')[1].split(',')[0].split('>')[0].trim() : '未知'})';
+      if (e.type == DioExceptionType.badResponse) {
+        return '服务器返回错误\nAPI: $path';
+      }
+      final errType = s.contains('type=')
+          ? s.split('type=')[1].split(',')[0].split('>')[0].trim()
+          : '未知';
+      return '网络连接失败($errType)\nAPI: $path\n请确认服务器地址 http://192.168.1.189:3000 可访问';
+    }
+    if (s.contains('SocketException')) {
+      return '网络连接失败，请检查网络';
     }
     if (s.contains('statusCode')) {
-      final code = s.contains('status code ') ? s.split('status code ')[1].split(',')[0].trim() : '';
+      final code = s.contains('status code ')
+          ? s.split('status code ')[1].split(',')[0].trim()
+          : '';
       return '登录失败，服务器返回错误码: $code';
     }
     if (s.contains('error')) {
@@ -103,6 +127,6 @@ class AuthProvider extends ChangeNotifier {
         return m;
       } catch (_) {}
     }
-    return '操作失败: ${s.length > 50 ? '${s.substring(0, 50)}…' : s}';
+    return '操作失败: ${s.length > 100 ? '${s.substring(0, 100)}…' : s}';
   }
 }

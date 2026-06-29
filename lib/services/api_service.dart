@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'api_client.dart';
 import '../models/user.dart';
 import '../models/room.dart';
@@ -80,8 +81,22 @@ class ApiService {
   // ==================== 私密群组 ====================
 
   Future<RCGroupsListResponse> getGroups({int count=50,int offset=0}) async {
-    final resp = await _dio.get('/groups.list', queryParameters: {'count':count,'offset':offset});
-    return RCGroupsListResponse.fromJson(resp.data);
+    // 优先使用 groups.list（Rocket.Chat 标准端点）
+    // 某些 5.x 版本可能只有 groups.listAll（需管理员权限）
+    // 为避免登录后崩溃，逐级回退：list → listAll → 空列表
+    try {
+      final resp = await _dio.get('/groups.list', queryParameters: {'count':count,'offset':offset});
+      return RCGroupsListResponse.fromJson(resp.data);
+    } catch (e) {
+      debugPrint('[API] groups.list failed ($e), trying groups.listAll');
+      try {
+        final resp = await _dio.get('/groups.listAll', queryParameters: {'count':count,'offset':offset});
+        return RCGroupsListResponse.fromJson(resp.data);
+      } catch (e2) {
+        debugPrint('[API] groups.listAll also failed ($e2), returning empty');
+        return RCGroupsListResponse(groups: []);
+      }
+    }
   }
 
   Future<RCMessagesResponse> getGroupMessages(String roomId, {int count=50,int offset=0}) async {

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../models/message.dart';
 
@@ -12,6 +13,7 @@ class DdpClient {
   String _authToken = '';
   String _sessionId = '';
   bool _connected = false;
+  bool get isConnected => _connected;
   int _callId = 0;
   int _subIdCounter = 0;
   Timer? _pingTimer;
@@ -34,6 +36,7 @@ class DdpClient {
 
   void disconnect() {
     _connected = false;
+    _loginRetried = false;
     _clearTimers();
     _roomSubs.clear();
     _pending.clear();
@@ -46,7 +49,12 @@ class DdpClient {
     unsubscribeRoom(roomId);
     final subId = 'sub_${++_subIdCounter}';
     _roomSubs[roomId] = _RoomSub(subId: subId, callback: onMessage);
-    if (_connected) _sendSubscribe(roomId, subId);
+    if (_connected) {
+      stdout.writeln('[DDP] Subscribing to $roomId (connected), subId=$subId');
+      _sendSubscribe(roomId, subId);
+    } else {
+      stdout.writeln('[DDP] Queued subscription for $roomId (not connected yet), subId=$subId');
+    }
   }
 
   void unsubscribeRoom(String roomId) {
@@ -66,14 +74,21 @@ class DdpClient {
 
   void _doConnect() {
     _notifyStatus(DdpStatus.connecting);
+    stdout.writeln('[DDP] Connecting to $_url ...');
     try {
       _channel = WebSocketChannel.connect(Uri.parse(_url));
+      stdout.writeln('[DDP] WebSocket connected, sending DDP connect...');
       _channel!.stream.listen(
         (data) => _onMessage(data as String),
-        onError: (_) { _notifyStatus(DdpStatus.error); _scheduleReconnect(); },
+        onError: (err) {
+          stdout.writeln('[DDP] WebSocket stream error: reconnecting...');
+          _notifyStatus(DdpStatus.error);
+          _scheduleReconnect();
+        },
         onDone: () => _onClose(),
       );
-    } catch (_) {
+    } catch (e) {
+      stdout.writeln('[DDP] WebSocket connect failed: $e, reconnecting...');
       _notifyStatus(DdpStatus.error);
       _scheduleReconnect();
     }
@@ -99,15 +114,18 @@ class DdpClient {
   void _onMessage(String raw) {
     try {
       final data = jsonDecode(raw) as Map<String, dynamic>;
-      switch (data['msg']) {
+      final msgType = data['msg'] as String? ?? '?';
+      switch (msgType) {
         case 'connected':
           _sessionId = data['session']??'';
+          stdout.writeln('[DDP] Server connected, session=$_sessionId, logging in...');
           _login();
           break;
         case 'result':
           _handleResult(data);
           break;
         case 'ready':
+          stdout.writeln('[DDP] Subscription ready: ${data['subs']}');
           break;
         case 'changed':
           _handleChanged(data);
@@ -115,11 +133,21 @@ class DdpClient {
         case 'ping':
           _send({'msg':'pong'});
           break;
+        case 'nosub':
+          stdout.writeln('[DDP] No subscription for: ${data['id']}');
+          break;
+        default:
+          stdout.writeln('[DDP] Unknown msg type: $msgType');
       }
-    } catch (_) {}
+    } catch (e) {
+      stdout.writeln('[DDP] Parse error: $e');
+    }
   }
 
+  bool _loginRetried = false;
+
   void _login() {
+    stdout.writeln('[DDP] Sending login with resume token (length=${_authToken.length})...');
     _send({'msg':'method','method':'login','params':[{'resume':_authToken}],'id':_nextCallId()});
   }
 
@@ -132,25 +160,48 @@ class DdpClient {
       return;
     }
     // login result
-    if (data['result'] is Map && data['result']['id'] != null) {
+    final result = data['result'];
+    if (result is Map && result['id'] != null) {
+      stdout.writeln('[DDP] Login success, userId=${result['id']}, connected!');
       _connected = true;
+      _loginRetried = false;
       _notifyStatus(DdpStatus.connected);
       _resubscribeAll();
       _startPing();
+    } else if (data['error'] != null) {
+      stdout.writeln('[DDP] Login failed: ${data['error']}');
+      // 尝试用 accessToken 格式重试一次
+      if (!_loginRetried) {
+        _loginRetried = true;
+        stdout.writeln('[DDP] Retrying login with accessToken format...');
+        _send({'msg':'method','method':'login','params':[{'accessToken':_authToken}],'id':_nextCallId()});
+      } else {
+        stdout.writeln('[DDP] Both login attempts failed');
+        _notifyStatus(DdpStatus.error);
+      }
+    } else {
+      stdout.writeln('[DDP] Unhandled result: $data');
     }
   }
 
   void _handleChanged(Map<String, dynamic> data) {
-    if (data['collection'] != 'stream-room-messages') return;
+    if (data['collection'] != 'stream-room-messages') {
+      if (data['collection'] != null) stdout.writeln('[DDP] Changed for ${data['collection']}, ignoring');
+      return;
+    }
     final fields = data['fields'];
     if (fields == null || fields['args'] == null) return;
     final args = fields['args'] as List;
+    stdout.writeln('[DDP] Received ${args.length} message(s)');
     for (final msgPayload in args) {
       if (msgPayload is! Map) continue;
       final roomId = msgPayload['rid'] as String?;
       if (roomId == null) continue;
       final sub = _roomSubs[roomId];
-      if (sub == null) continue;
+      if (sub == null) {
+        stdout.writeln('[DDP] No subscriber for room $roomId (current subs: ${_roomSubs.keys.join(",")})');
+        continue;
+      }
 
       final rcMsg = RCMessage(
         id: msgPayload['_id']??'',
@@ -173,10 +224,12 @@ class DdpClient {
   }
 
   void _sendSubscribe(String roomId, String subId) {
+    stdout.writeln('[DDP] Sending subscribe: roomId=$roomId, subId=$subId');
     _send({'msg':'sub','id':subId,'name':'stream-room-messages','params':[roomId,false]});
   }
 
   void _resubscribeAll() {
+    stdout.writeln('[DDP] Resubscribing to ${_roomSubs.length} rooms: ${_roomSubs.keys.join(",")}');
     for (final entry in _roomSubs.entries) {
       _sendSubscribe(entry.key, entry.value.subId);
     }

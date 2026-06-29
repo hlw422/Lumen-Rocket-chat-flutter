@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/auth_provider.dart';
@@ -54,6 +55,15 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
     _focusNode.requestFocus();
   }
 
+  void _insertNewline() {
+    final text = _textCtrl.text;
+    final selection = _textCtrl.selection;
+    final start = selection.start;
+    final end = selection.end;
+    _textCtrl.text = text.substring(0, start) + '\n' + text.substring(end);
+    _textCtrl.selection = TextSelection.collapsed(offset: start + 1);
+  }
+
   @override
   Widget build(BuildContext context) {
     final chat = context.watch<ChatProvider>();
@@ -73,11 +83,13 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
             ? const Center(child: CircularProgressIndicator())
             : messages.isEmpty
               ? const Center(child: Text('暂无消息', style: TextStyle(color: Colors.grey)))
-              : ListView.builder(
-                  controller: _scrollCtrl,
-                  itemCount: messages.length,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  itemBuilder: (_, i) => MessageBubble(message: messages[i], isMe: messages[i].senderId == userId),
+              : SelectionArea(
+                  child: ListView.builder(
+                    controller: _scrollCtrl,
+                    itemCount: messages.length,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    itemBuilder: (_, i) => MessageBubble(message: messages[i], isMe: messages[i].senderId == userId),
+                  ),
                 ),
         ),
         const Divider(height: 1),
@@ -113,21 +125,39 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
               tooltip: '表情',
               onPressed: () => _showEmojiPicker(),
             ),
-            // 输入框
+            // 输入框 — Enter 发送 / Shift+Enter 换行
             Expanded(
-              child: TextField(
-                controller: _textCtrl,
-                focusNode: _focusNode,
-                maxLines: 5,
-                minLines: 1,
-                decoration: const InputDecoration(
-                  hintText: '输入消息...',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(20))),
-                  contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  isDense: true,
+              child: CallbackShortcuts(
+                bindings: {
+                  const SingleActivator(LogicalKeyboardKey.enter): _send,
+                  const SingleActivator(LogicalKeyboardKey.enter, shift: true): _insertNewline,
+                },
+                child: Focus(
+                  onKeyEvent: (node, event) {
+                    // 拦截裸 Enter（无修饰键）用于发送
+                    if (event is KeyDownEvent &&
+                        event.logicalKey == LogicalKeyboardKey.enter &&
+                        !HardwareKeyboard.instance.isShiftPressed &&
+                        !HardwareKeyboard.instance.isControlPressed) {
+                      _send();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: TextField(
+                    controller: _textCtrl,
+                    focusNode: _focusNode,
+                    maxLines: 5,
+                    minLines: 1,
+                    decoration: const InputDecoration(
+                      hintText: '输入消息…',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(20))),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      isDense: true,
+                    ),
+                    textInputAction: TextInputAction.newline,
+                  ),
                 ),
-                textInputAction: TextInputAction.newline,
-                onSubmitted: (_) => _send(),
               ),
             ),
             const SizedBox(width: 4),

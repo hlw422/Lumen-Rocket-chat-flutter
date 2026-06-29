@@ -81,11 +81,28 @@ class AuthProvider extends ChangeNotifier {
 
   String _formatError(Object e) {
     final s = e.toString();
-    if (s.contains('DioException')) return '网络连接失败，请检查服务器地址';
-    if (s.contains('error')) try {
-      final m = s.split('error:')[1].trim();
-      return m;
-    } catch (_) {}
-    return '操作失败，请稍后重试';
+    if (s.contains('DioException')) {
+      if (s.contains('Connection timed out') || s.contains('TimeoutException')) {
+        return '连接超时，请确认 Rocket.Chat 服务(192.168.1.189:3000)已启动';
+      }
+      if (s.contains('Connection refused') || s.contains('SocketException')) {
+        return 'Rocket.Chat 服务未启动，请启动 192.168.1.189:3000';
+      }
+      if (s.contains('No address associated') || s.contains('Failed host lookup')) {
+        return '无法解析服务器地址 192.168.1.189，请检查网络';
+      }
+      return '网络连接失败(${s.contains('type=') ? s.split('type=')[1].split(',')[0].split('>')[0].trim() : '未知'})';
+    }
+    if (s.contains('statusCode')) {
+      final code = s.contains('status code ') ? s.split('status code ')[1].split(',')[0].trim() : '';
+      return '登录失败，服务器返回错误码: $code';
+    }
+    if (s.contains('error')) {
+      try {
+        final m = s.split('error:')[1].trim();
+        return m;
+      } catch (_) {}
+    }
+    return '操作失败: ${s.length > 50 ? '${s.substring(0, 50)}…' : s}';
   }
 }

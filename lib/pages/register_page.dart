@@ -14,6 +14,7 @@ class _RegisterPageState extends State<RegisterPage> {
   final _passCtrl = TextEditingController();
   final _confirmCtrl = TextEditingController();
   bool _obscure = true;
+  bool _loading = false;
 
   Future<void> _register() async {
     final name = _nameCtrl.text.trim();
@@ -35,11 +36,26 @@ class _RegisterPageState extends State<RegisterPage> {
       return;
     }
 
-    final auth = context.read<AuthProvider>();
-    final ok = await auth.register(username: username, email: email, pass: pass, name: name);
-    if (ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('注册成功，请登录')));
-      Navigator.pop(context);
+    setState(() => _loading = true);
+    try {
+      final auth = context.read<AuthProvider>();
+      final ok = await auth.register(username: username, email: email, pass: pass, name: name);
+      if (!mounted) return;
+      setState(() => _loading = false);
+      if (ok) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('注册成功，请登录')));
+        Navigator.pop(context);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(auth.error ?? '注册失败，请稍后重试'), backgroundColor: Colors.red),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('网络异常: ${e.toString().length > 50 ? e.toString().substring(0, 50) : e}'), backgroundColor: Colors.red),
+      );
     }
   }
 
@@ -98,8 +114,8 @@ class _RegisterPageState extends State<RegisterPage> {
                     SizedBox(
                       width: double.infinity, height: 44,
                       child: ElevatedButton(
-                        onPressed: auth.loading?null:_register,
-                        child: auth.loading
+                        onPressed: _loading ? null : _register,
+                        child: _loading
                           ? const SizedBox(width:20,height:20,child:CircularProgressIndicator(strokeWidth:2))
                           : const Text('注册', style: TextStyle(fontSize: 16)),
                       ),

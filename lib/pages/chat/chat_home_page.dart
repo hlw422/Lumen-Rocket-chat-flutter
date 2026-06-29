@@ -23,11 +23,25 @@ class _ChatHomePageState extends State<ChatHomePage> {
       chat.connectDdp();
       chat.loadConversations();
       context.read<UserProvider>().loadUsers();
+      // 监听 currentRoomId 变化，手机端自动切到消息面板
+      chat.addListener(_onProviderChanged);
     });
+  }
+
+  void _onProviderChanged() {
+    if (!mounted) return;
+    final chat = context.read<ChatProvider>();
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isWide = screenWidth > 800;
+    // 手机端：currentRoomId 从 null 变为有值时自动切到消息面板
+    if (!isWide && chat.currentRoomId != null && _tabIndex != 1) {
+      setState(() => _tabIndex = 1);
+    }
   }
 
   @override
   void dispose() {
+    context.read<ChatProvider>().removeListener(_onProviderChanged);
     context.read<ChatProvider>().disposeResources();
     super.dispose();
   }

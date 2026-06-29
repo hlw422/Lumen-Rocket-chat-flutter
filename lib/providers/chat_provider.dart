@@ -16,10 +16,13 @@ class ChatProvider extends ChangeNotifier {
 
   List<Conversation> conversations = [];
   String? currentRoomId;
+  ConversationType? _currentRoomType;
   List<ChatMessage> messages = [];
   bool loading = false;
   bool messagesLoading = false;
   bool ddpConnected = false;
+  bool conversationsError = false;
+  String? error;
 
   Conversation? get currentConversation =>
       conversations.cast<Conversation?>().firstWhere(
@@ -44,7 +47,7 @@ class ChatProvider extends ChangeNotifier {
 
   /// 加载合并后的会话列表
   Future<void> loadConversations() async {
-    loading = true; notifyListeners();
+    loading = true; conversationsError = false; notifyListeners();
     try {
       final merged = <Conversation>[];
       final results = await Future.wait([
@@ -58,26 +61,29 @@ class ChatProvider extends ChangeNotifier {
       conversations = merged;
     } catch (e) {
       debugPrint('loadConversations error: $e');
+      conversationsError = true;
+      error = _formatErr(e);
     } finally {
       loading = false; notifyListeners();
     }
   }
 
   /// 选择会话
-  Future<void> selectConversation(String roomId) async {
+  Future<void> selectConversation(String roomId, {ConversationType? type}) async {
     if (currentRoomId != null) _ddp.unsubscribeRoom(currentRoomId!);
     currentRoomId = roomId;
-    await _loadMessages(roomId);
+    _currentRoomType = type ?? currentConversation?.type;
+    await _loadMessages(roomId, type: _currentRoomType);
     _ddp.subscribeRoom(roomId, _onDdpMessage);
     notifyListeners();
   }
 
-  Future<void> _loadMessages(String roomId, {int count=50, int offset=0}) async {
-    messagesLoading = true; notifyListeners();
+  Future<void> _loadMessages(String roomId, {int count=50, int offset=0, ConversationType? type}) async {
+    messagesLoading = true; error = null; notifyListeners();
     try {
-      final conv = currentConversation;
+      final convType = type ?? currentConversation?.type;
       RCMessagesResponse res;
-      switch (conv?.type) {
+      switch (convType) {
         case ConversationType.channel: res = await _api.getChannelMessages(roomId, count: count, offset: offset); break;
         case ConversationType.group: res = await _api.getGroupMessages(roomId, count: count, offset: offset); break;
         case ConversationType.direct:
@@ -88,9 +94,17 @@ class ChatProvider extends ChangeNotifier {
           ..sort((a,b)=>a.timestamp.compareTo(b.timestamp));
     } catch (e) {
       debugPrint('loadMessages error: $e');
+      error = _formatErr(e);
     } finally {
       messagesLoading = false; notifyListeners();
     }
+  }
+
+  String _formatErr(Object e) {
+    final s = e.toString();
+    if (s.contains('DioException') || s.contains('SocketException')) return '网络连接失败，请检查服务器地址';
+    if (s.length > 80) return '${s.substring(0, 80)}…';
+    return s;
   }
 
   void _onDdpMessage(RCMessage rcMsg) {
@@ -184,6 +198,9 @@ class ChatProvider extends ChangeNotifier {
     conversations = [];
     messages = [];
     currentRoomId = null;
+    _currentRoomType = null;
+    conversationsError = false;
+    error = null;
     notifyListeners();
   }
 }

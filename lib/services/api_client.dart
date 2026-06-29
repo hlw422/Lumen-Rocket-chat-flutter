@@ -26,9 +26,9 @@ class ApiClient {
         handler.next(options);
       },
       onResponse: (response, handler) {
-        // Rocket.Chat 返回 {success, data} 包装，自动解包 data
+        // Rocket.Chat 返回 {success, data} 包装，仅在 success===true 时解包 data
         final data = response.data;
-        if (data is Map && data.containsKey('data') && data['data'] != null) {
+        if (data is Map && data.containsKey('success') && data['success'] == true && data.containsKey('data') && data['data'] != null) {
           response.data = data['data'];
         }
         handler.next(response);

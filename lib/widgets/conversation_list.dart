@@ -13,6 +13,24 @@ class ConversationListWidget extends StatelessWidget {
     if (chat.loading) {
       return const Center(child: CircularProgressIndicator());
     }
+    if (chat.conversationsError && chat.conversations.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const SizedBox(height: 12),
+            Text(chat.error ?? '加载会话列表失败', style: const TextStyle(color: Colors.red, fontSize: 14)),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () => chat.loadConversations(),
+              icon: const Icon(Icons.refresh, size: 18),
+              label: const Text('点击重试'),
+            ),
+          ],
+        ),
+      );
+    }
     if (chat.conversations.isEmpty) {
       return const Center(
         child: Text('暂无会话', style: TextStyle(color: Colors.grey)),

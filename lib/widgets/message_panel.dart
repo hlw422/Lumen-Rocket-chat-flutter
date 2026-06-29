@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/auth_provider.dart';
 import 'message_bubble.dart';
+import 'message_search.dart';
 import 'emoji_picker.dart';
 
 class MessagePanelWidget extends StatefulWidget {
@@ -143,6 +144,12 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            // 搜索聊天记录
+            IconButton(
+              icon: const Icon(Icons.search),
+              tooltip: '搜索聊天记录',
+              onPressed: _showMessageSearch,
+            ),
             // 图片上传
             IconButton(
               icon: const Icon(Icons.image_outlined),
@@ -205,6 +212,20 @@ class _MessagePanelWidgetState extends State<MessagePanelWidget> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showMessageSearch() {
+    final chat = context.read<ChatProvider>();
+    if (chat.currentRoomId == null) return;
+    chat.clearSearch();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => SizedBox(
+        height: MediaQuery.of(context).size.height * 0.75,
+        child: const MessageSearchWidget(),
       ),
     );
   }

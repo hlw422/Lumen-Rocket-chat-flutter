@@ -28,6 +28,11 @@ class ChatProvider extends ChangeNotifier {
   bool conversationsError = false;
   String? error;
 
+  // 搜索
+  List<ChatMessage> searchResults = [];
+  bool searchLoading = false;
+  String? searchQuery;
+
   Conversation? get currentConversation =>
       conversations.cast<Conversation?>().firstWhere(
           (c) => c?.id == currentRoomId, orElse: () => null);
@@ -245,6 +250,42 @@ class ChatProvider extends ChangeNotifier {
   /// 加载图片 bytes（带认证头，用于 Image.memory）
   Future<Uint8List> loadImageBytes(String url) async {
     return _fileService.loadImage(url);
+  }
+
+  /// 搜索当前会话中的消息
+  Future<void> searchMessages(String query) async {
+    if (query.trim().isEmpty) {
+      searchResults = [];
+      searchQuery = null;
+      notifyListeners();
+      return;
+    }
+    if (currentRoomId == null) return;
+    searchLoading = true;
+    searchQuery = query.trim();
+    notifyListeners();
+
+    try {
+      final res = await _api.searchMessages(
+        roomId: currentRoomId!,
+        searchText: searchQuery!,
+        count: 50,
+      );
+      searchResults = res.messages.map((m) => m.toChatMessage()).toList()
+        ..sort((a, b) => b.timestamp.compareTo(a.timestamp)); // 最新在前
+    } catch (e) {
+      debugPrint('searchMessages error: $e');
+      error = _formatErr(e);
+    } finally {
+      searchLoading = false;
+      notifyListeners();
+    }
+  }
+
+  void clearSearch() {
+    searchResults = [];
+    searchQuery = null;
+    notifyListeners();
   }
 
   /// 清理

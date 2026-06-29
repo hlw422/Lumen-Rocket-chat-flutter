@@ -148,4 +148,22 @@ class ApiService {
         options: Options(sendTimeout: const Duration(minutes: 5)));
     return RCPostMessageResponse.fromJson(resp.data);
   }
+
+  // ==================== 搜索 ====================
+
+  /// GET /api/v1/chat.search  搜索消息
+  Future<RCMessagesResponse> searchMessages({
+    required String roomId,
+    required String searchText,
+    int count = 20,
+    int offset = 0,
+  }) async {
+    final resp = await _dio.get('/chat.search', queryParameters: {
+      'roomId': roomId,
+      'searchText': searchText,
+      'count': count,
+      'offset': offset,
+    });
+    return RCMessagesResponse.fromJson(resp.data);
+  }
 }
